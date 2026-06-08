@@ -18,20 +18,27 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { formatCurrency } from "@/lib/constants";
-import { Download, Upload, Trash2, Save, Target } from "lucide-react";
+import { Download, Upload, Trash2, Save, Target, FileText } from "lucide-react";
+import N26ImportDialog from "@/components/n26-import-dialog";
 
 export default function SettingsClient() {
   const [savingsGoal, setSavingsGoal] = useState("500");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [n26ImportOpen, setN26ImportOpen] = useState(false);
+  const [categories, setCategories] = useState<{ slug: string; name: string; icon: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings");
-      const data = await res.json();
+      const [settingsRes, catRes] = await Promise.all([
+        fetch("/api/settings"),
+        fetch("/api/categories"),
+      ]);
+      const [data, catData] = await Promise.all([settingsRes.json(), catRes.json()]);
       if (data.savingsGoal !== undefined) setSavingsGoal(String(data.savingsGoal));
+      setCategories(catData.map((c: { slug: string; name: string; icon: string }) => ({ slug: c.slug, name: c.name, icon: c.icon })));
     } catch {
       toast.error("Fehler beim Laden der Einstellungen");
     } finally {
@@ -210,6 +217,42 @@ export default function SettingsClient() {
           </p>
         </CardContent>
       </Card>
+
+      {/* N26 Import */}
+      <Card className="border-primary/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4" />
+            N26 Kontoauszug importieren
+          </CardTitle>
+          <CardDescription>
+            Importiere Transaktionen direkt aus deinem N26-Kontoauszug (PDF).
+            Die Transaktionen werden automatisch erkannt und kategorisiert.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button
+            onClick={() => setN26ImportOpen(true)}
+            className="gap-2"
+          >
+            <FileText className="h-4 w-4" />
+            N26 PDF importieren
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Unterstützt: N26 Kontoauszüge (Monatsübersicht als PDF). Transaktionen werden vor dem Import zur Prüfung angezeigt.
+          </p>
+        </CardContent>
+      </Card>
+
+      <N26ImportDialog
+        open={n26ImportOpen}
+        onOpenChange={setN26ImportOpen}
+        onSuccess={() => {
+          setN26ImportOpen(false);
+          window.location.reload();
+        }}
+        categories={categories}
+      />
 
       <Separator />
 

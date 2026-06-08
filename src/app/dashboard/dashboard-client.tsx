@@ -20,6 +20,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { TrendingUp, TrendingDown, Wallet, PiggyBank } from "lucide-react";
+import SankeyChart from "@/components/sankey-chart";
 
 interface Transaction {
   _id: string;
@@ -243,6 +244,9 @@ export default function DashboardClient({ year, month }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sankey Diagram */}
+      <SankeyChart year={year} month={month} />
 
       {/* Savings Goal + Budget Traffic Lights */}
       <div className="grid gap-4 lg:grid-cols-2">
