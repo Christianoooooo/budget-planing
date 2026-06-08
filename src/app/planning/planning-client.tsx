@@ -69,8 +69,6 @@ export default function PlanningClient({ year, month }: Props) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const catMap = new Map(categories.map(c => [c.slug, c]));
-
   // Actual spending per category
   const actualSpending: Record<string, number> = {};
   transactions.filter(t => t.type !== "income").forEach(t => {
@@ -167,7 +165,7 @@ export default function PlanningClient({ year, month }: Props) {
                   interval={0}
                 />
                 <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}€`} />
-                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                 <Legend />
                 <Bar dataKey="geplant" name="Geplant" fill="#6366f1" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="tatsächlich" name="Tatsächlich" fill="#ef4444" radius={[4, 4, 0, 0]} />

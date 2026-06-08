@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { Suspense, useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -72,20 +72,16 @@ function getPageTitle(pathname: string): string {
   return titles[pathname] || "Budget Planer";
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+function MonthNav() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { theme, setTheme } = useTheme();
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [addTxOpen, setAddTxOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => { setMounted(true); }, []);
-
   const now = new Date();
   const currentYear = parseInt(searchParams.get("year") || String(now.getFullYear()));
   const currentMonth = parseInt(searchParams.get("month") || String(now.getMonth() + 1));
+  const showMonthNav = ["/dashboard", "/transactions", "/planning"].includes(pathname);
+
+  if (!showMonthNav) return null;
 
   function navigateMonth(delta: number) {
     let newMonth = currentMonth + delta;
@@ -98,7 +94,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     router.push(`${pathname}?${params.toString()}`);
   }
 
-  const showMonthNav = ["/dashboard", "/transactions", "/planning"].includes(pathname);
+  return (
+    <div className="flex items-center gap-1">
+      <Button variant="ghost" size="icon" onClick={() => navigateMonth(-1)}>
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
+      <span className="text-sm font-medium min-w-[120px] text-center">
+        {GERMAN_MONTHS[currentMonth - 1]} {currentYear}
+      </span>
+      <Button variant="ghost" size="icon" onClick={() => navigateMonth(1)}>
+        <ChevronRight className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+function AppShellInner({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { theme, setTheme } = useTheme();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [addTxOpen, setAddTxOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   return (
     <div className="flex min-h-screen">
@@ -150,20 +169,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <h1 className="font-semibold text-lg flex-1">{getPageTitle(pathname)}</h1>
 
-          {/* Month navigation */}
-          {showMonthNav && (
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={() => navigateMonth(-1)}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm font-medium min-w-[120px] text-center">
-                {GERMAN_MONTHS[currentMonth - 1]} {currentYear}
-              </span>
-              <Button variant="ghost" size="icon" onClick={() => navigateMonth(1)}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
+          {/* Month navigation wrapped in Suspense */}
+          <Suspense fallback={null}>
+            <MonthNav />
+          </Suspense>
 
           {/* Theme toggle */}
           {mounted && (
@@ -222,5 +231,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }}
       />
     </div>
+  );
+}
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-muted-foreground">Laden...</div>
+      </div>
+    }>
+      <AppShellInner>{children}</AppShellInner>
+    </Suspense>
   );
 }
