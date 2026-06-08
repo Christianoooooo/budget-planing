@@ -15,6 +15,7 @@ import {
   Moon,
   Sun,
   Plus,
+  Calculator,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -24,11 +25,12 @@ import { GERMAN_MONTHS } from "@/lib/constants";
 import AddTransactionDialog from "@/components/add-transaction-dialog";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/transactions", label: "Transaktionen", icon: ArrowLeftRight },
-  { href: "/categories", label: "Kategorien", icon: Tag },
-  { href: "/planning", label: "Planung", icon: BarChart2 },
-  { href: "/settings", label: "Einstellungen", icon: Settings },
+  { href: "/dashboard",    label: "Dashboard",     icon: LayoutDashboard },
+  { href: "/transactions", label: "Transaktionen", icon: ArrowLeftRight  },
+  { href: "/planner",      label: "Finanzplan",    icon: Calculator      },
+  { href: "/categories",   label: "Kategorien",    icon: Tag             },
+  { href: "/planning",     label: "Auswertung",    icon: BarChart2       },
+  { href: "/settings",     label: "Einstellungen", icon: Settings        },
 ];
 
 function NavItem({
@@ -63,11 +65,12 @@ function NavItem({
 
 function getPageTitle(pathname: string): string {
   const titles: Record<string, string> = {
-    "/dashboard": "Dashboard",
+    "/dashboard":    "Dashboard",
     "/transactions": "Transaktionen",
-    "/categories": "Kategorien",
-    "/planning": "Planung",
-    "/settings": "Einstellungen",
+    "/planner":      "Finanzplan",
+    "/categories":   "Kategorien",
+    "/planning":     "Auswertung",
+    "/settings":     "Einstellungen",
   };
   return titles[pathname] || "Budget Planer";
 }
@@ -79,7 +82,7 @@ function MonthNav() {
   const now = new Date();
   const currentYear = parseInt(searchParams.get("year") || String(now.getFullYear()));
   const currentMonth = parseInt(searchParams.get("month") || String(now.getMonth() + 1));
-  const showMonthNav = ["/dashboard", "/transactions", "/planning"].includes(pathname);
+  const showMonthNav = ["/dashboard", "/transactions", "/planning", "/planner"].includes(pathname);
 
   if (!showMonthNav) return null;
 
