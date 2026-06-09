@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { Upload, Trash2, Moon, Sun } from "lucide-react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { Upload, Trash2, Moon, Sun, CalendarDays } from "lucide-react";
 import { useTheme } from "next-themes";
+import { GERMAN_MONTHS } from "@/lib/constants";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Transaction {
@@ -145,15 +146,85 @@ function getCat(slug: string) {
   return CATS[slug] ?? CATS.other;
 }
 
+const LS_TRANSACTIONS = "n26_transactions";
+const LS_OVERRIDES = "n26_category_overrides";
+
+function txKey(t: Transaction): string {
+  return `${t.date}|${t.partner}|${t.amount}|${t.reference}`;
+}
+
+function loadOverrides(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(LS_OVERRIDES) || "{}");
+  } catch { return {}; }
+}
+
+function saveOverrides(o: Record<string, string>) {
+  localStorage.setItem(LS_OVERRIDES, JSON.stringify(o));
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [view, setView] = useState<"overview" | "list">("overview");
+  const [selectedPeriod, setSelectedPeriod] = useState<string>("all");
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
 
-  const expenses = transactions.filter(t => t.amount < 0);
-  const incomes  = transactions.filter(t => t.amount > 0);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_TRANSACTIONS);
+      if (saved) {
+        const txs: Transaction[] = JSON.parse(saved);
+        if (txs.length > 0) setTransactions(txs);
+      }
+      setOverrides(loadOverrides());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (transactions.length > 0) {
+      localStorage.setItem(LS_TRANSACTIONS, JSON.stringify(transactions));
+    } else {
+      localStorage.removeItem(LS_TRANSACTIONS);
+    }
+  }, [transactions]);
+
+  const withOverrides = useMemo(() =>
+    transactions.map(t => {
+      const key = txKey(t);
+      return overrides[key] ? { ...t, category: overrides[key] } : t;
+    }),
+  [transactions, overrides]);
+
+  const changeCategory = useCallback((t: Transaction, newCat: string) => {
+    const key = txKey(t);
+    const next = { ...overrides, [key]: newCat };
+    setOverrides(next);
+    saveOverrides(next);
+  }, [overrides]);
+
+  const periods = useMemo(() => {
+    const set = new Set<string>();
+    withOverrides.forEach(t => {
+      const [y, m] = t.date.split("-");
+      if (y && m) set.add(`${y}-${m}`);
+    });
+    return Array.from(set).sort().reverse();
+  }, [withOverrides]);
+
+  function periodLabel(p: string): string {
+    const [y, m] = p.split("-");
+    return `${GERMAN_MONTHS[parseInt(m, 10) - 1]} ${y}`;
+  }
+
+  const filtered = selectedPeriod === "all"
+    ? withOverrides
+    : withOverrides.filter(t => t.date.startsWith(selectedPeriod));
+
+  const expenses = filtered.filter(t => t.amount < 0);
+  const incomes  = filtered.filter(t => t.amount > 0);
   const totalOut = expenses.reduce((s, t) => s + Math.abs(t.amount), 0);
   const totalIn  = incomes.reduce((s, t) => s + t.amount, 0);
   const balance  = totalIn - totalOut;
@@ -178,6 +249,7 @@ export default function Home() {
       const text = e.target?.result as string;
       const txs = parseCSV(text);
       setTransactions(txs);
+      setSelectedPeriod("all");
       setView("overview");
     };
     reader.readAsText(file, "utf-8");
@@ -226,7 +298,7 @@ export default function Home() {
       </div>
 
       {/* Results */}
-      {transactions.length > 0 && (
+      {withOverrides.length > 0 && (
         <div className="space-y-4">
 
           {/* Totals */}
@@ -247,15 +319,33 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Toggle */}
-          <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit">
-            {(["overview", "list"] as const).map(v => (
-              <button key={v} onClick={() => setView(v)}
-                className={`text-xs px-3 py-1.5 rounded-md transition-colors ${view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                {v === "overview" ? "Kategorien" : "Alle"}
-              </button>
-            ))}
+          {/* Controls */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit">
+              {(["overview", "list"] as const).map(v => (
+                <button key={v} onClick={() => setView(v)}
+                  className={`text-xs px-3 py-1.5 rounded-md transition-colors ${view === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {v === "overview" ? "Kategorien" : "Alle"}
+                </button>
+              ))}
+            </div>
+
+            {periods.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+                <select
+                  value={selectedPeriod}
+                  onChange={e => setSelectedPeriod(e.target.value)}
+                  className="text-xs bg-muted border-none rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                >
+                  <option value="all">Gesamter Zeitraum</option>
+                  {periods.map(p => (
+                    <option key={p} value={p}>{periodLabel(p)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Category overview */}
@@ -321,7 +411,7 @@ export default function Home() {
           {/* Full list */}
           {view === "list" && (
             <div className="space-y-1">
-              {[...transactions]
+              {[...filtered]
                 .sort((a, b) => b.date.localeCompare(a.date))
                 .map((tx, i) => {
                   const c = tx.amount > 0 ? getCat("income") : getCat(tx.category);
@@ -330,7 +420,19 @@ export default function Home() {
                       <span>{c.icon}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{tx.partner}</p>
-                        <p className="text-xs text-muted-foreground">{fmtDate(tx.date)} · {c.name}</p>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span>{fmtDate(tx.date)}</span>
+                          <span>·</span>
+                          <select
+                            value={tx.category}
+                            onChange={e => changeCategory(tx, e.target.value)}
+                            className="bg-transparent border-none text-xs text-muted-foreground hover:text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary rounded px-0.5 -ml-0.5"
+                          >
+                            {Object.entries(CATS).map(([slug, cat]) => (
+                              <option key={slug} value={slug}>{cat.icon} {cat.name}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                       <span className={`text-sm font-semibold shrink-0 ${tx.amount >= 0 ? "text-green-500" : "text-red-500"}`}>
                         {tx.amount >= 0 ? "+" : "−"}{fmt(Math.abs(tx.amount))}
@@ -342,7 +444,7 @@ export default function Home() {
           )}
 
           <button
-            onClick={() => setTransactions([])}
+            onClick={() => { setTransactions([]); setSelectedPeriod("all"); setOverrides({}); localStorage.removeItem(LS_OVERRIDES); }}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors pt-1"
           >
             <Trash2 className="h-3.5 w-3.5" /> Zurücksetzen
