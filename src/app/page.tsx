@@ -1,9 +1,17 @@
 "use client";
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
-import { Upload, Trash2, Moon, Sun, CalendarDays } from "lucide-react";
+import { Upload, Trash2, Moon, Sun, CalendarDays, ChevronDown, Users, Pen } from "lucide-react";
 import { useTheme } from "next-themes";
 import { GERMAN_MONTHS } from "@/lib/constants";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
+} from "@/components/ui/dropdown-menu";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Transaction {
@@ -27,6 +35,8 @@ const CATS: Record<string, { name: string; icon: string; color: string }> = {
   fees:       { name: "Gebühren",      icon: "🏦", color: "#64748b" },
   other:      { name: "Sonstiges",     icon: "📦", color: "#94a3b8" },
 };
+
+const CAT_ENTRIES = Object.entries(CATS);
 
 const KEYWORDS: [string, string][] = [
   // income
@@ -79,14 +89,10 @@ function categorize(partner: string, reference: string, type: string, amount: nu
 }
 
 // ── CSV parser ────────────────────────────────────────────────────────────────
-// N26 format: "Booking Date","Value Date","Partner Name","Partner Iban",Type,
-//             "Payment Reference","Account Name","Amount (EUR)","Original Amount",
-//             "Original Currency","Exchange Rate"
 function parseCSV(text: string): Transaction[] {
   const lines = text.trim().split("\n").filter(Boolean);
   if (lines.length < 2) return [];
 
-  // Parse a single CSV line respecting quoted fields
   function parseLine(line: string): string[] {
     const fields: string[] = [];
     let cur = "";
@@ -124,10 +130,7 @@ function parseCSV(text: string): Transaction[] {
     const date      = cols[iDate];
 
     result.push({
-      date,
-      partner,
-      amount,
-      reference,
+      date, partner, amount, reference,
       category: categorize(partner, reference, type, amount),
     });
   }
@@ -146,21 +149,20 @@ function getCat(slug: string) {
   return CATS[slug] ?? CATS.other;
 }
 
+// ── LocalStorage ─────────────────────────────────────────────────────────────
 const LS_TRANSACTIONS = "n26_transactions";
 const LS_OVERRIDES = "n26_category_overrides";
+const LS_PARTNER_RULES = "n26_partner_rules";
 
 function txKey(t: Transaction): string {
   return `${t.date}|${t.partner}|${t.amount}|${t.reference}`;
 }
 
-function loadOverrides(): Record<string, string> {
+function loadJson<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(LS_OVERRIDES) || "{}");
-  } catch { return {}; }
-}
-
-function saveOverrides(o: Record<string, string>) {
-  localStorage.setItem(LS_OVERRIDES, JSON.stringify(o));
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -169,6 +171,7 @@ export default function Home() {
   const [view, setView] = useState<"overview" | "list">("overview");
   const [selectedPeriod, setSelectedPeriod] = useState<string>("all");
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [partnerRules, setPartnerRules] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
 
@@ -179,7 +182,8 @@ export default function Home() {
         const txs: Transaction[] = JSON.parse(saved);
         if (txs.length > 0) setTransactions(txs);
       }
-      setOverrides(loadOverrides());
+      setOverrides(loadJson(LS_OVERRIDES, {}));
+      setPartnerRules(loadJson(LS_PARTNER_RULES, {}));
     } catch {}
   }, []);
 
@@ -193,17 +197,46 @@ export default function Home() {
 
   const withOverrides = useMemo(() =>
     transactions.map(t => {
-      const key = txKey(t);
-      return overrides[key] ? { ...t, category: overrides[key] } : t;
+      const singleKey = txKey(t);
+      if (overrides[singleKey]) return { ...t, category: overrides[singleKey] };
+      if (partnerRules[t.partner]) return { ...t, category: partnerRules[t.partner] };
+      return t;
     }),
-  [transactions, overrides]);
+  [transactions, overrides, partnerRules]);
 
-  const changeCategory = useCallback((t: Transaction, newCat: string) => {
+  const changeCategorySingle = useCallback((t: Transaction, newCat: string) => {
     const key = txKey(t);
     const next = { ...overrides, [key]: newCat };
     setOverrides(next);
-    saveOverrides(next);
+    localStorage.setItem(LS_OVERRIDES, JSON.stringify(next));
   }, [overrides]);
+
+  const changeCategoryPartner = useCallback((partner: string, newCat: string) => {
+    const next = { ...partnerRules, [partner]: newCat };
+    setPartnerRules(next);
+    localStorage.setItem(LS_PARTNER_RULES, JSON.stringify(next));
+    // remove single overrides for this partner since the rule covers them
+    const cleaned = { ...overrides };
+    let changed = false;
+    for (const key of Object.keys(cleaned)) {
+      if (key.includes(`|${partner}|`)) {
+        delete cleaned[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      setOverrides(cleaned);
+      localStorage.setItem(LS_OVERRIDES, JSON.stringify(cleaned));
+    }
+  }, [partnerRules, overrides]);
+
+  const partnerTxCount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    transactions.forEach(t => {
+      counts[t.partner] = (counts[t.partner] || 0) + 1;
+    });
+    return counts;
+  }, [transactions]);
 
   const periods = useMemo(() => {
     const set = new Set<string>();
@@ -229,7 +262,6 @@ export default function Home() {
   const totalIn  = incomes.reduce((s, t) => s + t.amount, 0);
   const balance  = totalIn - totalOut;
 
-  // Group expenses by category
   const byCategory: Record<string, { total: number; items: Transaction[] }> = {};
   expenses.forEach(t => {
     const slug = t.category === "income" ? "other" : t.category;
@@ -261,6 +293,17 @@ export default function Home() {
     const f = e.dataTransfer.files[0];
     if (f) handleFile(f);
   }
+
+  function clearAll() {
+    setTransactions([]);
+    setSelectedPeriod("all");
+    setOverrides({});
+    setPartnerRules({});
+    localStorage.removeItem(LS_OVERRIDES);
+    localStorage.removeItem(LS_PARTNER_RULES);
+  }
+
+  const activeRulesCount = Object.keys(partnerRules).length;
 
   return (
     <div className="min-h-screen p-4 sm:p-8 max-w-2xl mx-auto">
@@ -332,19 +375,55 @@ export default function Home() {
             </div>
 
             {periods.length > 1 && (
-              <div className="flex items-center gap-1.5">
-                <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-                <select
-                  value={selectedPeriod}
-                  onChange={e => setSelectedPeriod(e.target.value)}
-                  className="text-xs bg-muted border-none rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-                >
-                  <option value="all">Gesamter Zeitraum</option>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger className="w-auto h-auto gap-1.5 text-xs border-none bg-muted px-2.5 py-1.5 rounded-lg [&>svg]:h-3 [&>svg]:w-3">
+                  <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Gesamter Zeitraum</SelectItem>
                   {periods.map(p => (
-                    <option key={p} value={p}>{periodLabel(p)}</option>
+                    <SelectItem key={p} value={p}>{periodLabel(p)}</SelectItem>
                   ))}
-                </select>
-              </div>
+                </SelectContent>
+              </Select>
+            )}
+
+            {activeRulesCount > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-1.5 text-xs bg-muted px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors">
+                    <Users className="h-3.5 w-3.5" />
+                    {activeRulesCount} {activeRulesCount === 1 ? "Regel" : "Regeln"}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-w-[300px]">
+                  <DropdownMenuLabel>Partner-Regeln</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {Object.entries(partnerRules).map(([partner, cat]) => {
+                    const c = getCat(cat);
+                    return (
+                      <DropdownMenuItem
+                        key={partner}
+                        className="flex items-center justify-between gap-2 text-xs"
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          const next = { ...partnerRules };
+                          delete next[partner];
+                          setPartnerRules(next);
+                          localStorage.setItem(LS_PARTNER_RULES, JSON.stringify(next));
+                        }}
+                      >
+                        <span className="truncate">{partner}</span>
+                        <span className="shrink-0 flex items-center gap-1">
+                          {c.icon} {c.name}
+                          <span className="text-destructive ml-1">×</span>
+                        </span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
 
@@ -415,6 +494,7 @@ export default function Home() {
                 .sort((a, b) => b.date.localeCompare(a.date))
                 .map((tx, i) => {
                   const c = tx.amount > 0 ? getCat("income") : getCat(tx.category);
+                  const count = partnerTxCount[tx.partner] || 1;
                   return (
                     <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
                       <span>{c.icon}</span>
@@ -423,15 +503,49 @@ export default function Home() {
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                           <span>{fmtDate(tx.date)}</span>
                           <span>·</span>
-                          <select
-                            value={tx.category}
-                            onChange={e => changeCategory(tx, e.target.value)}
-                            className="bg-transparent border-none text-xs text-muted-foreground hover:text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary rounded px-0.5 -ml-0.5"
-                          >
-                            {Object.entries(CATS).map(([slug, cat]) => (
-                              <option key={slug} value={slug}>{cat.icon} {cat.name}</option>
-                            ))}
-                          </select>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="flex items-center gap-0.5 hover:text-foreground transition-colors">
+                                {c.name}
+                                <ChevronDown className="h-3 w-3" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                              <DropdownMenuLabel className="text-xs">Nur diese Zahlung</DropdownMenuLabel>
+                              {CAT_ENTRIES.map(([slug, cat]) => (
+                                <DropdownMenuItem
+                                  key={slug}
+                                  className="text-xs gap-2"
+                                  onSelect={() => changeCategorySingle(tx, slug)}
+                                >
+                                  <Pen className="h-3 w-3 opacity-40" />
+                                  <span>{cat.icon} {cat.name}</span>
+                                </DropdownMenuItem>
+                              ))}
+                              {count > 1 && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger className="text-xs gap-2">
+                                      <Users className="h-3 w-3 opacity-40" />
+                                      <span className="truncate">Alle von &quot;{tx.partner.length > 20 ? tx.partner.slice(0, 20) + "…" : tx.partner}&quot; ({count}×)</span>
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent>
+                                      {CAT_ENTRIES.map(([slug, cat]) => (
+                                        <DropdownMenuItem
+                                          key={slug}
+                                          className="text-xs gap-2"
+                                          onSelect={() => changeCategoryPartner(tx.partner, slug)}
+                                        >
+                                          <span>{cat.icon} {cat.name}</span>
+                                        </DropdownMenuItem>
+                                      ))}
+                                    </DropdownMenuSubContent>
+                                  </DropdownMenuSub>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                       <span className={`text-sm font-semibold shrink-0 ${tx.amount >= 0 ? "text-green-500" : "text-red-500"}`}>
@@ -444,7 +558,7 @@ export default function Home() {
           )}
 
           <button
-            onClick={() => { setTransactions([]); setSelectedPeriod("all"); setOverrides({}); localStorage.removeItem(LS_OVERRIDES); }}
+            onClick={clearAll}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors pt-1"
           >
             <Trash2 className="h-3.5 w-3.5" /> Zurücksetzen
